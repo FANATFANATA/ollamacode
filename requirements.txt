@@ -1,0 +1,8 @@
+requests>=2.31.0
+rich>=13.7.0
+textual>=0.54.0
+selenium>=4.15.0
+beautifulsoup4>=4.12.2
+playwright>=1.40.0
+duckduckgo-search>=4.1.1
+
