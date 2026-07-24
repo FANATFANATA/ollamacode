@@ -1,7 +1,5 @@
-requests
-rich
-textual
-selenium
-beautifulsoup4
-playwright
-duckduckgo-search
+requests>=2.31,<3
+rich>=13,<14
+selenium>=4.15,<5
+webdriver-manager>=4,<5
+duckduckgo-search>=4,<7
