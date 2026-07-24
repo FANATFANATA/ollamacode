@@ -1,3 +1,3 @@
-# ollamacode
+# DanyCode
 
-Клиент для ollama
+Ollama client.
