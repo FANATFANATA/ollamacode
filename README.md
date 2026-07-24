@@ -1,0 +1,3 @@
+# ollamacode
+
+Клиент для ollama
