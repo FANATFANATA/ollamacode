@@ -125,11 +125,6 @@ def test_cd_blocked_outside_base(registry):
     assert "outside base_dir" in result or "Error" in result
 
 
-def test_invalid_selector_raises(registry):
-    result = registry.browser_click("div", by="invalid")
-    assert "Error" in result
-
-
 def test_execute_tool_unknown(registry):
     result = registry.execute_tool("nonexistent_tool", {})
     assert "Unknown tool" in result
@@ -148,7 +143,7 @@ def test_execute_tool_filters_unknown_args(registry):
 def test_tool_definitions_structure(registry):
     defs = registry.get_tool_definitions()
     assert isinstance(defs, list)
-    assert len(defs) >= 14
+    assert len(defs) == 7
     for d in defs:
         assert d["type"] == "function"
         assert "name" in d["function"]

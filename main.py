@@ -290,7 +290,6 @@ def main():
     except KeyboardInterrupt:
         ui.print("\n[yellow]👋 Goodbye![/yellow]")
     finally:
-        tool_registry.close_browser()
         log.info("OllamaCode shutdown complete")
 
 

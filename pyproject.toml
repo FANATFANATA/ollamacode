@@ -4,15 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ollamacode"
-version = "0.1.0"
+version = "0.2.0"
 description = "Agentic Coding Assistant with Ollama"
 requires-python = ">=3.9"
 dependencies = [
     "requests>=2.31,<3",
     "rich>=13,<14",
-    "selenium>=4.15,<5",
-    "webdriver-manager>=4,<5",
-    "duckduckgo-search>=4,<7",
 ]
 
 [project.optional-dependencies]
