@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
+import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -10,12 +13,10 @@ TOOL_SCHEMAS: list[dict] = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Read the contents of a file at the given path.",
+            "description": "Read file contents.",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "File path to read"}
-                },
+                "properties": {"path": {"type": "string", "description": "File path"}},
                 "required": ["path"],
             },
         },
@@ -24,12 +25,12 @@ TOOL_SCHEMAS: list[dict] = [
         "type": "function",
         "function": {
             "name": "write_file",
-            "description": "Write content to a file, creating it if it does not exist.",
+            "description": "Write content to file, creating if needed.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "File path to write"},
-                    "content": {"type": "string", "description": "Content to write"},
+                    "path": {"type": "string", "description": "File path"},
+                    "content": {"type": "string", "description": "Content"},
                 },
                 "required": ["path", "content"],
             },
@@ -39,13 +40,13 @@ TOOL_SCHEMAS: list[dict] = [
         "type": "function",
         "function": {
             "name": "edit_file",
-            "description": "Edit a file by replacing an exact search string with a replacement string. The search string must be unique in the file.",
+            "description": "Replace exact unique search string with replacement in file.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "File path to edit"},
+                    "path": {"type": "string", "description": "File path"},
                     "search": {"type": "string", "description": "Exact string to find"},
-                    "replace": {"type": "string", "description": "Replacement string"},
+                    "replace": {"type": "string", "description": "Replacement"},
                 },
                 "required": ["path", "search", "replace"],
             },
@@ -55,7 +56,7 @@ TOOL_SCHEMAS: list[dict] = [
         "type": "function",
         "function": {
             "name": "list_dir",
-            "description": "List files and directories at the given path.",
+            "description": "List files and directories.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -69,22 +70,13 @@ TOOL_SCHEMAS: list[dict] = [
         "type": "function",
         "function": {
             "name": "search",
-            "description": "Search for a regex pattern in files using grep.",
+            "description": "Search regex pattern in files.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "pattern": {
-                        "type": "string",
-                        "description": "Regex pattern to search",
-                    },
-                    "path": {
-                        "type": "string",
-                        "description": "Directory or file to search in",
-                    },
-                    "include": {
-                        "type": "string",
-                        "description": "File glob filter, e.g. *.py",
-                    },
+                    "pattern": {"type": "string", "description": "Regex pattern"},
+                    "path": {"type": "string", "description": "Path to search in"},
+                    "include": {"type": "string", "description": "File glob filter"},
                 },
                 "required": ["pattern"],
             },
@@ -94,14 +86,11 @@ TOOL_SCHEMAS: list[dict] = [
         "type": "function",
         "function": {
             "name": "run_command",
-            "description": "Execute a shell command and return stdout, stderr, return code and current working directory.",
+            "description": "Execute shell command via PowerShell (Windows) or sh (Unix). Returns stdout, stderr, returncode, cwd.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "Shell command to execute",
-                    }
+                    "command": {"type": "string", "description": "Command to execute"}
                 },
                 "required": ["command"],
             },
@@ -111,20 +100,57 @@ TOOL_SCHEMAS: list[dict] = [
         "type": "function",
         "function": {
             "name": "ask_user",
-            "description": "Ask the user a question and wait for their response.",
+            "description": "Ask user a question.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "question": {
-                        "type": "string",
-                        "description": "Question to ask the user",
-                    }
+                    "question": {"type": "string", "description": "Question"}
                 },
                 "required": ["question"],
             },
         },
     },
 ]
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+_CLIXML_RE = re.compile(r'<S S="Error">(.*?)</S>', re.DOTALL)
+
+
+def get_shell() -> str:
+    if shutil.which("pwsh"):
+        return "pwsh"
+    if os.name == "nt":
+        return "powershell.exe"
+    return ""
+
+
+def get_shell_name() -> str:
+    shell = get_shell()
+    if shell in ("pwsh", "powershell.exe"):
+        return "PowerShell"
+    return "sh"
+
+
+def _ps_args(shell: str, command: str) -> list[str]:
+    full = (
+        f"[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
+        f"$ProgressPreference='SilentlyContinue'; "
+        f"{command}"
+    )
+    encoded = base64.b64encode(full.encode("utf-16-le")).decode("ascii")
+    return [shell, "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded]
+
+
+def _clean_output(text: str) -> str:
+    if "#< CLIXML" in text:
+        parts = _CLIXML_RE.findall(text)
+        if parts:
+            text = "\n".join(parts)
+    text = text.replace("_x001B_", "\x1b")
+    text = text.replace("_x000D_", "")
+    text = text.replace("_x000A_", "\n")
+    text = _ANSI_RE.sub("", text)
+    return text.strip()
 
 
 def execute_tool(name: str, arguments: dict, ask_fn=None) -> str:
@@ -206,42 +232,48 @@ def _list_dir(path: str) -> str:
 
 def _search(pattern: str, path: str, include: str | None) -> str:
     try:
-        cmd = ["grep", "-rn", "--color=never"]
-        if include:
-            cmd.extend(["--include", include])
-        cmd.extend([pattern, path])
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        output = result.stdout.strip()
-        if not output:
+        shell = get_shell()
+        if shell:
+            ep = pattern.replace("'", "''")
+            epath = path.replace("'", "''")
+            ps = f"Get-ChildItem -Path '{epath}' -Recurse -File"
+            if include:
+                ei = include.replace("'", "''")
+                ps += f" -Filter '{ei}'"
+            ps += f" | Select-String -Pattern '{ep}' | Select-Object -First 100"
+            ps += ' | ForEach-Object { "$($_.Path):$($_.LineNumber):$($_.Line)" }'
+            args = _ps_args(shell, ps)
+        else:
+            args = ["grep", "-rn"]
+            if include:
+                args.extend(["--include", include])
+            args.extend([pattern, path])
+        result = subprocess.run(args, capture_output=True, timeout=30)
+        stdout = _clean_output(result.stdout.decode("utf-8", errors="replace"))
+        if not stdout:
             return json.dumps({"results": []})
-        lines = output.split("\n")[:100]
+        lines = stdout.split("\n")[:100]
         return json.dumps({"results": lines})
     except subprocess.TimeoutExpired:
         return json.dumps({"error": "Search timed out"})
-    except FileNotFoundError:
-        try:
-            cmd = ["findstr", "/s", "/n", pattern, path]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            output = result.stdout.strip()
-            if not output:
-                return json.dumps({"results": []})
-            lines = output.split("\n")[:100]
-            return json.dumps({"results": lines})
-        except Exception as e:
-            return json.dumps({"error": str(e)})
     except Exception as e:
         return json.dumps({"error": str(e)})
 
 
 def _run_command(command: str) -> str:
     try:
-        result = subprocess.run(
-            command, shell=True, capture_output=True, text=True, timeout=120
-        )
+        shell = get_shell()
+        if shell:
+            args = _ps_args(shell, command)
+        else:
+            args = ["/bin/sh", "-c", command]
+        result = subprocess.run(args, capture_output=True, timeout=120)
+        stdout = _clean_output(result.stdout.decode("utf-8", errors="replace"))
+        stderr = _clean_output(result.stderr.decode("utf-8", errors="replace"))
         return json.dumps(
             {
-                "stdout": result.stdout[-10000:],
-                "stderr": result.stderr[-5000:],
+                "stdout": stdout[-10000:],
+                "stderr": stderr[-5000:],
                 "returncode": result.returncode,
                 "cwd": os.getcwd(),
             }

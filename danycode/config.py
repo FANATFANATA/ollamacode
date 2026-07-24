@@ -20,7 +20,7 @@ DEFAULTS = {
     "seed": -1,
     "think": "false",
     "keep_alive": "5m",
-    "system_prompt": "You are a coding assistant. Use tools to read, write, and edit files. Be precise and concise.",
+    "system_prompt": "Coding assistant. Use tools. Be concise.",
     "mode": "ask",
 }
 

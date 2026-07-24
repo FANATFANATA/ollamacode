@@ -11,11 +11,12 @@ from rich.panel import Panel
 from danycode.client import OllamaClient
 from danycode.config import Config
 from danycode.session import Session
-from danycode.tools import execute_tool
+from danycode.tools import execute_tool, get_shell_name
 
 console = Console()
 
 MAX_ITERATIONS = 25
+REPEAT_THRESHOLD = 3
 
 
 class Agent:
@@ -27,11 +28,9 @@ class Agent:
 
     def _ensure_system_prompt(self) -> None:
         if not self.session.messages or self.session.messages[0]["role"] != "system":
-            env_info = (
-                f"OS: {platform.system()} {platform.release()} ({platform.machine()}). "
-                f"CWD: {os.getcwd()}."
-            )
-            full_prompt = f"{env_info}\n\n{self.config.system_prompt}"
+            shell_name = get_shell_name()
+            env = f"{platform.system()} | {shell_name} | {os.getcwd()}"
+            full_prompt = f"{env}\n{self.config.system_prompt}"
             self.session.messages.insert(
                 0,
                 {
@@ -54,12 +53,12 @@ class Agent:
 
     async def _loop(self) -> None:
         iterations = 0
+        recent_sigs: list[str] = []
+
         while True:
             iterations += 1
             if iterations > MAX_ITERATIONS:
-                console.print(
-                    "\n[bold red]Max tool iterations reached. Stopping.[/bold red]"
-                )
+                console.print("\n[bold red]Max tool iterations reached.[/bold red]")
                 break
 
             messages = self.session.messages
@@ -67,9 +66,33 @@ class Agent:
 
             if assistant_msg.get("tool_calls"):
                 self.session.add(assistant_msg)
+
                 for tc in assistant_msg["tool_calls"]:
                     fn_name = tc["function"]["name"]
                     fn_args = tc["function"]["arguments"]
+
+                    sig = json.dumps({"n": fn_name, "a": fn_args}, sort_keys=True)
+                    recent_sigs.append(sig)
+                    if len(recent_sigs) > REPEAT_THRESHOLD:
+                        recent_sigs.pop(0)
+                    if (
+                        len(recent_sigs) == REPEAT_THRESHOLD
+                        and len(set(recent_sigs)) == 1
+                    ):
+                        console.print(
+                            "\n[bold red]Repeated identical tool call. Stopping.[/bold red]"
+                        )
+                        self.session.add(
+                            {
+                                "role": "tool",
+                                "content": json.dumps(
+                                    {
+                                        "error": "Repeated identical tool call detected. Stopping."
+                                    }
+                                ),
+                            }
+                        )
+                        return
 
                     console.print(
                         Panel(
